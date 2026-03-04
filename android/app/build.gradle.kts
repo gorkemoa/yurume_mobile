@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.rivorya.yuruyus"
+    namespace = "com.rivorya.yuruyusapp"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -21,7 +21,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.rivorya.yuruyus"
+        applicationId = "com.rivorya.yuruyusapp"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

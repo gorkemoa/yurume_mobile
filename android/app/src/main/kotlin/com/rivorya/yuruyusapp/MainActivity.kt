@@ -1,4 +1,4 @@
-package com.rivorya.yuruyus
+package com.rivorya.yuruyusapp
 
 import io.flutter.embedding.android.FlutterActivity
 
