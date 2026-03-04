@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -41,16 +42,19 @@ class AuthController extends ChangeNotifier {
     );
     _deviceName = _localStore.readDeviceName();
     _token = _localStore.readToken();
+    _user = _readCachedUser();
     _api.configure(baseUrl: _baseUrl, token: _token);
 
     if (_token != null && _token!.isNotEmpty) {
       try {
         _user = await _api.me();
-      } catch (_) {
-        _token = null;
-        _user = null;
-        await _localStore.clearToken();
-        _api.configure(baseUrl: _baseUrl, token: null);
+        await _persistCachedUser(_user);
+      } catch (error) {
+        if (_shouldClearSessionForError(error)) {
+          await _clearSession();
+        } else {
+          _user ??= const AppUser(id: 0, name: 'Offline Kullanici');
+        }
       }
     }
 
@@ -178,6 +182,7 @@ class AuthController extends ChangeNotifier {
     _user = result.user;
     _api.configure(baseUrl: _baseUrl, token: _token);
     await _localStore.writeToken(result.token);
+    await _persistCachedUser(result.user);
     notifyListeners();
   }
 
@@ -186,7 +191,48 @@ class AuthController extends ChangeNotifier {
     _user = null;
     _api.configure(baseUrl: _baseUrl, token: null);
     await _localStore.clearToken();
+    await _localStore.clearAuthUserJson();
     notifyListeners();
+  }
+
+  AppUser? _readCachedUser() {
+    final raw = _localStore.readAuthUserJson();
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      final parsed = jsonDecode(raw);
+      if (parsed is! Map<String, dynamic>) {
+        return null;
+      }
+      return AppUser.fromJson(parsed);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _persistCachedUser(AppUser? user) async {
+    if (user == null) {
+      await _localStore.clearAuthUserJson();
+      return;
+    }
+
+    final payload = <String, dynamic>{
+      'id': user.id,
+      'name': user.name,
+      'email': user.email,
+    };
+    await _localStore.writeAuthUserJson(jsonEncode(payload));
+  }
+
+  bool _shouldClearSessionForError(Object error) {
+    if (error is! ApiError) {
+      return false;
+    }
+
+    final statusCode = error.statusCode;
+    return statusCode == 401 || statusCode == 403;
   }
 
   void _setBusy(bool value) {

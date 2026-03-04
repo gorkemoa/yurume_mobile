@@ -29,6 +29,7 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
   bool _didAutoCenter = false;
   int? _selectedTerritoryId;
+  LatLng? _lastFollowCenter;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +47,10 @@ class _MapScreenState extends State<MapScreen> {
     final territories = tracking.territories;
 
     _tryAutoCenter(center);
+    _followTrackingPosition(
+      currentPosition: tracking.currentPosition,
+      isTracking: tracking.isTracking,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -234,6 +239,34 @@ class _MapScreenState extends State<MapScreen> {
     _didAutoCenter = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _mapController.move(center, 16);
+    });
+  }
+
+  void _followTrackingPosition({
+    required Position? currentPosition,
+    required bool isTracking,
+  }) {
+    if (!isTracking || currentPosition == null) {
+      return;
+    }
+
+    final next = LatLng(currentPosition.latitude, currentPosition.longitude);
+    final last = _lastFollowCenter;
+    if (last != null) {
+      final distance = Geolocator.distanceBetween(
+        last.latitude,
+        last.longitude,
+        next.latitude,
+        next.longitude,
+      );
+      if (distance < 2.2) {
+        return;
+      }
+    }
+
+    _lastFollowCenter = next;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _mapController.move(next, 16.5);
     });
   }
 

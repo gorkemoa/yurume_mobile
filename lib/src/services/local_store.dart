@@ -8,6 +8,7 @@ class LocalStore {
   final SharedPreferences _preferences;
 
   static const _tokenKey = 'auth_token';
+  static const _authUserKey = 'auth_user_json';
   static const _baseUrlKey = 'api_base_url';
   static const _deviceNameKey = 'device_name';
   static const _trackingStateKey = 'tracking_sync_state_v1';
@@ -20,6 +21,16 @@ class LocalStore {
 
   Future<void> clearToken() async {
     await _preferences.remove(_tokenKey);
+  }
+
+  String? readAuthUserJson() => _preferences.getString(_authUserKey);
+
+  Future<void> writeAuthUserJson(String userJson) async {
+    await _preferences.setString(_authUserKey, userJson);
+  }
+
+  Future<void> clearAuthUserJson() async {
+    await _preferences.remove(_authUserKey);
   }
 
   String? readBaseUrl() => _preferences.getString(_baseUrlKey);

@@ -13,13 +13,13 @@ import 'auth_controller.dart';
 class TrackingController extends ChangeNotifier {
   static const double _maxHumanSpeedMps = 4.2;
   static const double _speedSmoothAlpha = 0.35;
-  static const double _duplicateDistanceFloorM = 3.5;
-  static const double _duplicateDistanceCapM = 20;
-  static const double _duplicateAccuracyFactor = 0.5;
+  static const double _duplicateDistanceFloorM = 1.8;
+  static const double _duplicateDistanceCapM = 12;
+  static const double _duplicateAccuracyFactor = 0.28;
   static const double _defaultAccuracyM = 8;
-  static const double _maxTrustedAccuracyM = 45;
-  static const double _minTrustedSpeedMps = 0.8;
-  static const double _driftDistanceAccuracyRatio = 0.6;
+  static const double _maxTrustedAccuracyM = 55;
+  static const double _minTrustedSpeedMps = 0.45;
+  static const double _driftDistanceAccuracyRatio = 0.45;
 
   TrackingController({
     required BackendApi api,
@@ -48,11 +48,13 @@ class TrackingController extends ChangeNotifier {
   List<RoutePoint> _liveRoutePoints = const <RoutePoint>[];
   final List<RoutePoint> _pendingPoints = <RoutePoint>[];
   StreamSubscription<Position>? _positionSubscription;
+  Timer? _locationPulseTimer;
   Timer? _syncRetryTimer;
   Timer? _persistTimer;
   bool _flushing = false;
   bool _syncingPendingState = false;
   DateTime _lastFlushAt = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastPositionEventAt = DateTime.fromMillisecondsSinceEpoch(0);
   double? _currentSpeedMps;
   double? _smoothedSpeedMps;
   bool _sessionNeedsStartSync = false;
@@ -152,6 +154,9 @@ class TrackingController extends ChangeNotifier {
       _clearError();
       notifyListeners();
     } catch (error) {
+      if (_isRecoverableNetworkError(error)) {
+        return;
+      }
       _setError(error.toString());
     }
   }
@@ -343,6 +348,9 @@ class TrackingController extends ChangeNotifier {
       _mapConfig = await _api.getMapConfig();
       _clearError();
     } catch (error) {
+      if (_isRecoverableNetworkError(error)) {
+        return;
+      }
       _setError(error.toString());
     }
   }
@@ -376,6 +384,9 @@ class TrackingController extends ChangeNotifier {
       _clearError();
       _schedulePersistTrackingState();
     } catch (error) {
+      if (_isRecoverableNetworkError(error)) {
+        return;
+      }
       _setError(error.toString());
     }
   }
@@ -388,19 +399,27 @@ class TrackingController extends ChangeNotifier {
     await _ensureLocationPermission();
     const settings = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 3,
+      distanceFilter: 1,
     );
 
     _positionSubscription =
-        Geolocator.getPositionStream(locationSettings: settings).listen((
-          position,
-        ) {
-          _handlePositionUpdate(position);
-        });
+        Geolocator.getPositionStream(locationSettings: settings).listen(
+          (position) {
+            _handlePositionUpdate(position);
+          },
+          onError: (Object error) {
+            _setError('Konum akışı kesildi: $error');
+            _positionSubscription?.cancel();
+            _positionSubscription = null;
+          },
+          cancelOnError: false,
+        );
+    _ensureLocationPulseTimer();
   }
 
   void _handlePositionUpdate(Position position) {
     _currentPosition = position;
+    _lastPositionEventAt = DateTime.now();
 
     if (!isTracking) {
       _currentSpeedMps = null;
@@ -531,7 +550,11 @@ class TrackingController extends ChangeNotifier {
       _schedulePersistTrackingState();
     } catch (error) {
       _pendingPoints.insertAll(0, sending);
-      _setError(error.toString());
+      if (_isRecoverableNetworkError(error)) {
+        _setError('Internet yok. Noktalar yerelde senkron bekliyor.');
+      } else {
+        _setError(error.toString());
+      }
       _schedulePersistTrackingState();
     } finally {
       _flushing = false;
@@ -668,6 +691,34 @@ class TrackingController extends ChangeNotifier {
         return;
       }
       unawaited(_syncPendingState());
+    });
+  }
+
+  void _ensureLocationPulseTimer() {
+    if (_locationPulseTimer != null) {
+      return;
+    }
+
+    _locationPulseTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
+      if (!isTracking) {
+        return;
+      }
+
+      final staleFor = DateTime.now().difference(_lastPositionEventAt);
+      if (staleFor < const Duration(seconds: 9)) {
+        return;
+      }
+
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+          ),
+        );
+        _handlePositionUpdate(position);
+      } catch (_) {
+        // Passive fallback only; ignore transient pull failures.
+      }
     });
   }
 
@@ -1119,6 +1170,8 @@ class TrackingController extends ChangeNotifier {
     _clearError();
     _positionSubscription?.cancel();
     _positionSubscription = null;
+    _locationPulseTimer?.cancel();
+    _locationPulseTimer = null;
     _syncRetryTimer?.cancel();
     _syncRetryTimer = null;
     _persistTimer?.cancel();
@@ -1131,6 +1184,7 @@ class TrackingController extends ChangeNotifier {
   void dispose() {
     _authController.removeListener(_onAuthChanged);
     _positionSubscription?.cancel();
+    _locationPulseTimer?.cancel();
     _syncRetryTimer?.cancel();
     _persistTimer?.cancel();
     super.dispose();
